@@ -1,0 +1,18 @@
+[Unit]
+Description=AirPlay Now Playing Display - Chromium Kiosk
+After=airplay-display.service graphical.target
+Wants=airplay-display.service
+Requires=graphical.target
+
+[Service]
+Type=simple
+User=passivecitizen
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/passivecitizen/.Xauthority
+ExecStartPre=/bin/sleep 3
+ExecStart=/usr/bin/chromium-browser --noerrdialogs --disable-infobars --disable-gpu --disable-software-rasterizer --kiosk --incognito --no-first-run http://127.0.0.1:8080
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

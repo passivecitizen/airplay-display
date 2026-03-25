@@ -1,0 +1,14 @@
+[Unit]
+Description=AirPlay Now Playing Display - HTTP Server
+After=shairport-sync.service
+Wants=shairport-sync.service
+
+[Service]
+Type=simple
+User=passivecitizen
+ExecStart=/usr/bin/python3 /home/passivecitizen/airplay-display/airplay_now_playing.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
