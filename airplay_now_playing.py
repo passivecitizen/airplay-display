@@ -11,6 +11,7 @@ import json
 import os
 import re
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -168,6 +169,30 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def do_POST(self):
+        if self.path == "/api/display/on":
+            subprocess.Popen(
+                ["sudo", "systemctl", "start", "airplay-chromium.service"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            self._json_response({"status": "ok", "display": "on"})
+        elif self.path == "/api/display/off":
+            subprocess.Popen(
+                ["sudo", "systemctl", "stop", "airplay-chromium.service"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            self._json_response({"status": "ok", "display": "off"})
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def _json_response(self, data: dict, code: int = 200):
+        body = json.dumps(data).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, format, *args):
         pass  # Silence request logs
 
@@ -310,8 +335,8 @@ def main():
     )
     reader.start()
 
-    server = HTTPServer(("127.0.0.1", HTTP_PORT), RequestHandler)
-    print(f"Serving on http://127.0.0.1:{HTTP_PORT}", file=sys.stderr)
+    server = HTTPServer(("0.0.0.0", HTTP_PORT), RequestHandler)
+    print(f"Serving on http://0.0.0.0:{HTTP_PORT}", file=sys.stderr)
 
     try:
         server.serve_forever()
