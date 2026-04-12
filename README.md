@@ -289,6 +289,31 @@ metadata = {
     "updated": 1774397674.20
   }
   ```
+- `POST /api/display/on` — wake display (disable DPMS/screensaver) and start Chromium kiosk
+- `POST /api/display/off` — stop Chromium kiosk and blank display (re-enable DPMS)
+
+### Display Power Management
+
+The display automatically wakes when AirPlay playback starts (track metadata arrives) and blanks when playback ends. This is done via `xset` commands controlling X11 DPMS.
+
+You can also manually control the display from **Home Assistant** using the REST API:
+
+```yaml
+# Home Assistant configuration.yaml
+rest_command:
+  airplay_display_on:
+    url: "http://the-great-machine.local:8080/api/display/on"
+    method: POST
+  airplay_display_off:
+    url: "http://the-great-machine.local:8080/api/display/off"
+    method: POST
+```
+
+Or call it directly:
+```bash
+curl -X POST http://the-great-machine.local:8080/api/display/on
+curl -X POST http://the-great-machine.local:8080/api/display/off
+```
 
 ## Limitations
 

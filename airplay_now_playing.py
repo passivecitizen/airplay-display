@@ -35,6 +35,9 @@ CODE_PBEG = "70626567"  # "pbeg" - play begin
 CODE_PEND = "70656e64"  # "pend" - play end
 CODE_PFLS = "70666c73"  # "pfls" - play flush
 
+# X11 display for xset commands
+X_DISPLAY = os.getenv("DISPLAY", ":0")
+
 # Shared state
 _state = {
     "playing": False,
@@ -45,6 +48,40 @@ _state = {
     "updated": 0,
 }
 _state_lock = threading.Lock()
+
+
+def wake_display():
+    """Wake the screen and disable DPMS/screensaver so it stays on."""
+    env = os.environ.copy()
+    env["DISPLAY"] = X_DISPLAY
+    for cmd in [
+        ["xset", "s", "off"],          # disable screensaver
+        ["xset", "-dpms"],              # disable DPMS power management
+        ["xset", "s", "noblank"],       # disable screen blanking
+        ["xset", "dpms", "force", "on"],  # force screen on now
+    ]:
+        try:
+            subprocess.run(cmd, env=env, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=5)
+        except Exception:
+            pass
+
+
+def sleep_display():
+    """Re-enable DPMS and blank the screen."""
+    env = os.environ.copy()
+    env["DISPLAY"] = X_DISPLAY
+    for cmd in [
+        ["xset", "s", "on"],            # re-enable screensaver
+        ["xset", "+dpms"],              # re-enable DPMS
+        ["xset", "dpms", "60", "120", "180"],  # standby 1m, suspend 2m, off 3m
+        ["xset", "dpms", "force", "off"],  # blank screen now
+    ]:
+        try:
+            subprocess.run(cmd, env=env, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=5)
+        except Exception:
+            pass
 
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -171,6 +208,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/api/display/on":
+            wake_display()
             subprocess.Popen(
                 ["sudo", "systemctl", "start", "airplay-chromium.service"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -181,6 +219,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 ["sudo", "systemctl", "stop", "airplay-chromium.service"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
+            sleep_display()
             self._json_response({"status": "ok", "display": "off"})
         else:
             self.send_response(404)
@@ -295,6 +334,8 @@ def handle_item(item_type: str, item_code: str, data: bytes, raw_b64: str):
         if item_type == TYPE_CORE:
             text = data.decode("utf-8", errors="replace") if data else ""
             if item_code == CODE_TITLE:
+                if not _state["playing"]:
+                    threading.Thread(target=wake_display, daemon=True).start()
                 _state["title"] = text
                 _state["playing"] = True
                 _state["updated"] = time.time()
@@ -312,12 +353,15 @@ def handle_item(item_type: str, item_code: str, data: bytes, raw_b64: str):
                 _state["playing"] = True
                 _state["updated"] = time.time()
             elif item_code in (CODE_PEND, CODE_PFLS):
+                was_playing = _state["playing"]
                 _state["playing"] = False
                 _state["title"] = ""
                 _state["artist"] = ""
                 _state["album"] = ""
                 _state["cover_b64"] = ""
                 _state["updated"] = time.time()
+                if was_playing:
+                    threading.Thread(target=sleep_display, daemon=True).start()
 
 
 def main():
