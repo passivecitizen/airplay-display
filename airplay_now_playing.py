@@ -50,38 +50,58 @@ _state = {
 _state_lock = threading.Lock()
 
 
-def wake_display():
-    """Wake the screen and disable DPMS/screensaver so it stays on."""
+# Track whether display should be kept awake
+_display_awake = threading.Event()
+
+
+def _xset(*args):
+    """Run an xset command with the correct DISPLAY."""
     env = os.environ.copy()
     env["DISPLAY"] = X_DISPLAY
-    for cmd in [
-        ["xset", "s", "off"],          # disable screensaver
-        ["xset", "-dpms"],              # disable DPMS power management
-        ["xset", "s", "noblank"],       # disable screen blanking
-        ["xset", "dpms", "force", "on"],  # force screen on now
-    ]:
-        try:
-            subprocess.run(cmd, env=env, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=5)
-        except Exception:
-            pass
+    try:
+        subprocess.run(["xset"] + list(args), env=env,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=5)
+    except Exception:
+        pass
+
+
+def wake_display():
+    """Wake the screen and disable DPMS/screensaver so it stays on."""
+    _xset("s", "off")           # disable screensaver
+    _xset("s", "noblank")       # disable screen blanking
+    _xset("-dpms")              # disable DPMS power management
+    _xset("dpms", "force", "on")  # force screen on now
+    _display_awake.set()
 
 
 def sleep_display():
     """Re-enable DPMS and blank the screen."""
-    env = os.environ.copy()
-    env["DISPLAY"] = X_DISPLAY
-    for cmd in [
-        ["xset", "s", "on"],            # re-enable screensaver
-        ["xset", "+dpms"],              # re-enable DPMS
-        ["xset", "dpms", "60", "120", "180"],  # standby 1m, suspend 2m, off 3m
-        ["xset", "dpms", "force", "off"],  # blank screen now
-    ]:
-        try:
-            subprocess.run(cmd, env=env, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=5)
-        except Exception:
-            pass
+    _display_awake.clear()
+    _xset("s", "on")            # re-enable screensaver
+    _xset("+dpms")              # re-enable DPMS
+    _xset("dpms", "60", "120", "180")  # standby 1m, suspend 2m, off 3m
+    _xset("dpms", "force", "off")  # blank screen now
+
+
+def display_keepalive(stop_event: threading.Event):
+    """Periodically re-send xset commands while the display should be awake.
+
+    LXDE's power manager (xfce4-power-manager) resets DPMS settings on its
+    own schedule, which can blank the screen even after we disable DPMS.
+    This thread overrides it every 30 seconds.
+    """
+    while not stop_event.is_set():
+        if _display_awake.wait(timeout=5):
+            _xset("s", "off")
+            _xset("s", "noblank")
+            _xset("-dpms")
+            _xset("dpms", "force", "on")
+            # Wait 30s, but wake up early if display should sleep
+            for _ in range(30):
+                if not _display_awake.is_set() or stop_event.is_set():
+                    break
+                time.sleep(1)
 
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -378,6 +398,11 @@ def main():
         target=read_metadata_pipe, args=(stop_event,), daemon=True
     )
     reader.start()
+
+    keepalive = threading.Thread(
+        target=display_keepalive, args=(stop_event,), daemon=True
+    )
+    keepalive.start()
 
     server = HTTPServer(("0.0.0.0", HTTP_PORT), RequestHandler)
     print(f"Serving on http://0.0.0.0:{HTTP_PORT}", file=sys.stderr)
